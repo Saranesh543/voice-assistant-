@@ -5,6 +5,7 @@ export interface JarvisDesktopApi {
   showWindow: () => Promise<void>
   hideWindow: () => Promise<void>
   minimizeWindow: () => Promise<void>
+  summonWindow: () => Promise<void>
   toggleCompactMode: () => Promise<'overlay' | 'compact'>
   setAlwaysOnTop: (flag: boolean) => Promise<boolean>
   getSettings: () => Promise<{
@@ -16,9 +17,14 @@ export interface JarvisDesktopApi {
   setAutoStart: (enabled: boolean) => Promise<boolean>
   quitApp: () => Promise<void>
   emergencyStop: () => Promise<void>
+  getMicMuted: () => Promise<boolean>
+  setMicMuted: (muted: boolean) => Promise<boolean>
+  toggleMicMute: () => Promise<boolean>
   onSummon: (callback: () => void) => () => void
   onEmergencyStop: (callback: () => void) => () => void
   onWindowModeChanged: (callback: (mode: 'overlay' | 'compact') => void) => () => void
+  onMicMuteChanged: (callback: (muted: boolean) => void) => () => void
+  onResume: (callback: () => void) => () => void
 }
 
 declare global {

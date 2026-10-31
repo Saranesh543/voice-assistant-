@@ -1,8 +1,9 @@
 import { BRIDGE_HTTP_URL } from '../config'
-import { getMic } from './audio'
+import { getMic, isMicMuted, watchMicMute, watchAudioRecovery } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
 import { caps } from './capabilities'
+import { startPorcupine, stopPorcupine } from './porcupine'
 
 /**
  * The voice loop.
@@ -406,6 +407,8 @@ export async function startVoice(h: VoiceHandlers): Promise<Voice> {
 async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
   let lastWake = 0
   let vad: Vad | null = null
+  let stopped = false
+  let porcupineRunning = false
 
   /**
    * Segments waiting for the transcriber, oldest first.
@@ -437,6 +440,47 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
     partial: (text) => h.onPartial(text),
   })
 
+  // Start Porcupine offline wake-word detector if configured
+  const initPorcupine = async () => {
+    if (stopped || isMicMuted()) return
+    const ok = await startPorcupine(() => {
+      if (stopped || isMicMuted()) return
+      const mode = h.mode()
+      if (mode === 'wake') {
+        diag.wakes++
+        diag.dropped = ''
+        diag.accepted++
+        h.onWake('')
+      }
+    })
+    porcupineRunning = ok
+  }
+
+  void initPorcupine()
+
+  // Track microphone mute state
+  const unMicMute = watchMicMute((muted) => {
+    if (muted) {
+      assemble.cancel()
+      pendingAudio.length = 0
+      if (porcupineRunning) {
+        stopPorcupine()
+        porcupineRunning = false
+      }
+    } else {
+      if (!stopped) {
+        void initPorcupine()
+      }
+    }
+  })
+
+  // Re-acquire and restart wake-word detector on hardware recovery
+  const unRecovery = watchAudioRecovery(() => {
+    if (stopped || isMicMuted()) return
+    console.log('[voice] audio recovery triggered in startElevenVoice')
+    void initPorcupine()
+  })
+
   /**
    * Send one captured segment to the bridge and act on the words.
    *
@@ -446,6 +490,10 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
    * now, not the one they interrupted.
    */
   const transcribe = async (blob: Blob) => {
+    if (isMicMuted()) {
+      drop('microphone is muted')
+      return
+    }
     const mode = h.mode()
     if (mode === 'deaf') return
     const t0 = performance.now()
@@ -519,6 +567,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
 
   vad = await startVad({
     onStart: () => {
+      if (isMicMuted()) return
       const mode = h.mode()
       diag.mode = mode
       diag.sessions++
@@ -539,10 +588,12 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       }
     },
     onEnd: (blob) => {
+      if (isMicMuted()) return
       pendingAudio.push(blob)
       void drain()
     },
     onLevel: (v) => {
+      if (isMicMuted()) return
       // Only paint the live level while actually listening for a command, so a
       // dormant reactor stays calm and does not twitch at every room noise.
       const mode = h.mode()
@@ -576,12 +627,20 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
 
   return {
     stop: () => {
+      stopped = true
+      unMicMute()
+      unRecovery()
       clearInterval(guardPoll)
       assemble.cancel()
+      pendingAudio.length = 0
+      if (porcupineRunning) {
+        stopPorcupine()
+        porcupineRunning = false
+      }
       vad?.stop()
       diag.running = false
     },
-    live: () => vad?.live() ?? false,
+    live: () => !stopped && (vad?.live() ?? false),
   }
 }
 
@@ -617,6 +676,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   let lastWake = 0
   let lastAlive = Date.now()
   let silenceTimer: ReturnType<typeof setTimeout> | null = null
+  let porcupineRunning = false
 
   /** Same assembly rules as the premium path — a pause is not a full stop. */
   const assemble = makeAssembler({
@@ -628,6 +688,24 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     },
     partial: (text) => h.onPartial(text),
   })
+
+  // Start Porcupine offline wake-word detector if configured
+  const initPorcupine = async () => {
+    if (stopped || isMicMuted()) return
+    const ok = await startPorcupine(() => {
+      if (stopped || isMicMuted()) return
+      const mode = h.mode()
+      if (mode === 'wake') {
+        diag.wakes++
+        diag.dropped = ''
+        diag.accepted++
+        h.onWake('')
+      }
+    })
+    porcupineRunning = ok
+  }
+
+  void initPorcupine()
 
   const touch = () => {
     lastAlive = Date.now()
@@ -647,6 +725,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   }
 
   const emit = () => {
+    if (isMicMuted()) {
+      reset()
+      return
+    }
     const text = `${settled} ${interim}`.replace(/\s+/g, ' ').trim()
     const mode = h.mode()
     reset()
@@ -685,6 +767,10 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
 
   const onResult = (e: any) => {
     touch()
+    if (isMicMuted()) {
+      reset()
+      return
+    }
     const mode = h.mode()
     diag.mode = mode
     if (mode === 'deaf') {
@@ -756,7 +842,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   }
 
   const spin = () => {
-    if (stopped || running) return
+    if (stopped || running || isMicMuted()) return
     rec = new Ctor()
     rec.continuous = true
     rec.interimResults = true
@@ -781,22 +867,53 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
       diag.running = false
       touch()
       rec = null
-      if (!stopped) setTimeout(spin, 80)
+      if (!stopped && !isMicMuted()) setTimeout(spin, 80)
     }
     try {
       rec.start()
     } catch {
       running = false
-      setTimeout(spin, 250)
+      if (!stopped && !isMicMuted()) setTimeout(spin, 250)
     }
   }
 
   spin()
 
+  // Track microphone mute state
+  const unMicMute = watchMicMute((muted) => {
+    if (muted) {
+      reset()
+      assemble.cancel()
+      if (porcupineRunning) {
+        stopPorcupine()
+        porcupineRunning = false
+      }
+      try {
+        rec?.abort()
+      } catch {}
+      rec = null
+      running = false
+      diag.running = false
+    } else {
+      if (!stopped) {
+        void initPorcupine()
+        spin()
+      }
+    }
+  })
+
+  // Re-acquire on hardware recovery
+  const unRecovery = watchAudioRecovery(() => {
+    if (!stopped && !isMicMuted()) {
+      void initPorcupine()
+      spin()
+    }
+  })
+
   // The heartbeat. If nothing has been heard from the engine for a while it has
   // gone quiet on us — tear it down and build a fresh one.
   const health = setInterval(() => {
-    if (stopped) return
+    if (stopped || isMicMuted()) return
     const idle = Date.now() - lastAlive
     diag.idleMs = idle
     if (idle < 15000) return
@@ -816,9 +933,15 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
   return {
     stop: () => {
       stopped = true
+      unMicMute()
+      unRecovery()
       clearInterval(health)
       clearSilence()
       assemble.cancel()
+      if (porcupineRunning) {
+        stopPorcupine()
+        porcupineRunning = false
+      }
       diag.running = false
       try {
         rec?.abort()

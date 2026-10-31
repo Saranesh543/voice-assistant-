@@ -248,10 +248,14 @@ type State = {
     resolve: (approved: boolean) => void
   } | null
 
+  /** Persistent hardware microphone mute state. */
+  micMuted: boolean
+
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
   setBootNote: (n: string) => void
+  setMicMuted: (muted: boolean) => void
   pushPanel: (p: Panel) => void
   clearPanels: () => void
   pushBlade: (b: Blade) => void
@@ -298,8 +302,10 @@ export const useStore = create<State>((set) => ({
   bootNote: '',
   ui: defaultUi(),
   pendingConfirm: null,
+  micMuted: false,
 
   setPendingConfirm: (pendingConfirm) => set({ pendingConfirm }),
+  setMicMuted: (micMuted) => set({ micMuted }),
   resolvePendingConfirm: (approved) => {
     set((state) => {
       if (state.pendingConfirm) {

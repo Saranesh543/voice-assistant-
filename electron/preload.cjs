@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   showWindow: () => ipcRenderer.invoke('window:show'),
   hideWindow: () => ipcRenderer.invoke('window:hide'),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
+  summonWindow: () => ipcRenderer.invoke('window:summon'),
   toggleCompactMode: () => ipcRenderer.invoke('window:toggle-compact'),
   setAlwaysOnTop: (flag) => ipcRenderer.invoke('window:set-always-on-top', Boolean(flag)),
 
@@ -34,6 +35,49 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   setAutoStart: (enabled) => ipcRenderer.invoke('settings:set-autostart', Boolean(enabled)),
   quitApp: () => ipcRenderer.invoke('app:quit'),
   emergencyStop: () => ipcRenderer.invoke('app:emergency-stop'),
+
+  getMicMuted: () => ipcRenderer.invoke('mic:get-muted'),
+  setMicMuted: (muted) => ipcRenderer.invoke('mic:set-muted', Boolean(muted)),
+  toggleMicMute: () => ipcRenderer.invoke('mic:toggle-muted'),
+
+  /**
+   * Subscribe to microphone mute state changes from tray or desktop.
+   * @param {(muted: boolean) => void} callback
+   * @returns {() => void} Unsubscribe function
+   */
+  onMicMuteChanged: (callback) => {
+    /** @type {(_: unknown, muted: boolean) => void} */
+    const handler = (_, muted) => {
+      try {
+        callback(Boolean(muted))
+      } catch (err) {
+        console.error('[jarvisDesktop] onMicMuteChanged error:', err)
+      }
+    }
+    ipcRenderer.on('jarvis:mic-mute-changed', handler)
+    return () => {
+      ipcRenderer.removeListener('jarvis:mic-mute-changed', handler)
+    }
+  },
+
+  /**
+   * Subscribe to system resume from sleep.
+   * @param {() => void} callback
+   * @returns {() => void} Unsubscribe function
+   */
+  onResume: (callback) => {
+    const handler = () => {
+      try {
+        callback()
+      } catch (err) {
+        console.error('[jarvisDesktop] onResume error:', err)
+      }
+    }
+    ipcRenderer.on('jarvis:system-resume', handler)
+    return () => {
+      ipcRenderer.removeListener('jarvis:system-resume', handler)
+    }
+  },
 
   /**
    * Subscribe to global summon events (Ctrl+Shift+Space or Tray "Wake JARVIS").

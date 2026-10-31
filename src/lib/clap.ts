@@ -1,4 +1,4 @@
-import { getMic } from './audio'
+import { getMic, isMicMuted } from './audio'
 
 /**
  * Clap to wake him up.
@@ -83,7 +83,7 @@ export async function listenForClap(onClap: () => void): Promise<ClapListener> {
   const history: number[] = []
   let floor = 0.01
   let stopped = false
-  let raf = 0
+  let timerId: ReturnType<typeof setInterval> | null = null
   let lastClap = 0
 
   /** A transient under examination, waiting to prove it decays. */
@@ -98,7 +98,15 @@ export async function listenForClap(onClap: () => void): Promise<ClapListener> {
 
   const tick = () => {
     if (stopped) return
-    raf = requestAnimationFrame(tick)
+
+    if (isMicMuted()) {
+      candidate = null
+      return
+    }
+
+    if (ctx.state === 'suspended') {
+      void ctx.resume()
+    }
 
     const now = performance.now()
     const level = rms()
@@ -145,14 +153,18 @@ export async function listenForClap(onClap: () => void): Promise<ClapListener> {
     candidate = { at: now, peak: level }
   }
 
-  tick()
+  // Unthrottled 25ms timer for background clap detection
+  timerId = setInterval(tick, 25)
   diag.listening = true
 
   return {
     stop: () => {
       stopped = true
       diag.listening = false
-      cancelAnimationFrame(raf)
+      if (timerId !== null) {
+        clearInterval(timerId)
+        timerId = null
+      }
       try {
         source.disconnect()
         // The shared microphone stream is NOT stopped here. It belongs to

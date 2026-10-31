@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
 import { isDesktop } from '../lib/desktop'
 import { emergencyStop } from '../lib/brain'
+import { setMicMuted } from '../lib/audio'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
@@ -162,6 +163,7 @@ export function Hud() {
   const gestures = useStore((s) => s.gestures)
   const looking = useStore((s) => s.looking)
   const ui = useStore((s) => s.ui)
+  const micMuted = useStore((s) => s.micMuted)
   const [desktopMode, setDesktopMode] = useState<'overlay' | 'compact'>('overlay')
 
   useEffect(() => {
@@ -214,10 +216,31 @@ export function Hud() {
                 LISTENING and PROCESSING for the rest of the session. */}
             {phase === 'boot' && bootNote ? bootNote : statusText[phase]}
           </span>
+          {micMuted && (
+            <span className="mic-muted-badge" title="Microphone is hardware muted">
+              <span className="mic-muted-dot" />
+              MIC MUTED
+            </span>
+          )}
         </div>
 
         {isDesktop() && (
           <div className="desktop-ctrls">
+            <button
+              className={`desktop-btn ${micMuted ? 'desktop-btn-muted' : 'desktop-btn-mic'}`}
+              onClick={() => {
+                const target = !micMuted
+                void setMicMuted(target).then(() => {
+                  useStore.getState().setMicMuted(target)
+                  if (window.jarvisDesktop?.setMicMuted) {
+                    void window.jarvisDesktop.setMicMuted(target)
+                  }
+                })
+              }}
+              title={micMuted ? 'Unmute Microphone' : 'Mute Microphone'}
+            >
+              {micMuted ? '● MIC MUTED' : 'MIC ON'}
+            </button>
             <button
               className="desktop-btn"
               onClick={() => {

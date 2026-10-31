@@ -8,6 +8,7 @@ import {
   ipcMain,
   screen,
   session,
+  powerMonitor,
 } from 'electron'
 import { spawn } from 'node:child_process'
 import {
@@ -280,7 +281,7 @@ function applyWindowMode(mode) {
   updateTrayMenu()
 }
 
-function summonJarvis() {
+function summonJarvis(fromRenderer = false) {
   if (!mainWindow) return
   const display = getActiveDisplay()
 
@@ -299,7 +300,30 @@ function summonJarvis() {
   mainWindow.setAlwaysOnTop(alwaysOnTop, 'screen-saver')
   mainWindow.focus()
 
-  mainWindow.webContents.send('jarvis:summon')
+  // Only dispatch jarvis:summon if triggered outside the renderer (e.g. global shortcut, tray)
+  // to avoid duplicate wake-word triggering loops.
+  if (!fromRenderer) {
+    mainWindow.webContents.send('jarvis:summon')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Microphone Privacy State
+// ---------------------------------------------------------------------------
+let isMicMuted = false
+
+function setMicMutedMain(muted, fromRenderer = false) {
+  isMicMuted = Boolean(muted)
+  console.log(`[desktop] microphone mute state updated: ${isMicMuted}`)
+  updateTrayMenu()
+  if (!fromRenderer && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('jarvis:mic-mute-changed', isMicMuted)
+  }
+  return isMicMuted
+}
+
+function toggleMicMuteMain() {
+  return setMicMutedMain(!isMicMuted, false)
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +384,10 @@ function updateTrayMenu() {
     {
       label: 'Wake JARVIS (Listen Now)',
       click: () => summonJarvis(),
+    },
+    {
+      label: isMicMuted ? 'Unmute Microphone' : 'Mute Microphone',
+      click: () => toggleMicMuteMain(),
     },
     {
       label: 'Emergency Stop Automation (Ctrl+Shift+Esc)',
@@ -595,6 +623,22 @@ function registerIpc() {
   ipcMain.handle('app:emergency-stop', () => {
     triggerEmergencyStop()
   })
+
+  ipcMain.handle('window:summon', () => {
+    summonJarvis(true)
+  })
+
+  ipcMain.handle('mic:get-muted', () => {
+    return isMicMuted
+  })
+
+  ipcMain.handle('mic:set-muted', (_, muted) => {
+    return setMicMutedMain(muted, true)
+  })
+
+  ipcMain.handle('mic:toggle-muted', () => {
+    return setMicMutedMain(!isMicMuted, true)
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -684,6 +728,14 @@ app.whenReady().then(async () => {
     }
   }
 
+  // System Sleep / Resume Detection
+  powerMonitor.on('resume', () => {
+    console.log('[desktop] system resumed from sleep — notifying renderer')
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('jarvis:system-resume')
+    }
+  })
+
   // Start Bridge
   await startBridge()
 
@@ -701,6 +753,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('will-quit', () => {
+  powerMonitor.removeAllListeners('resume')
   globalShortcut.unregisterAll()
   stopBridge()
   if (staticServer) {

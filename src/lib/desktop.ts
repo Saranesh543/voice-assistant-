@@ -76,3 +76,46 @@ export async function emergencyStopDesktop(): Promise<void> {
   }
 }
 
+export async function summonDesktopWindow(): Promise<void> {
+  if (typeof window !== 'undefined' && window.jarvisDesktop?.summonWindow) {
+    try {
+      await window.jarvisDesktop.summonWindow()
+    } catch (err) {
+      console.error('[desktop] summonDesktopWindow error:', err)
+    }
+  }
+}
+
+export async function getDesktopMicMuted(): Promise<boolean> {
+  if (typeof window !== 'undefined' && window.jarvisDesktop?.getMicMuted) {
+    try {
+      return await window.jarvisDesktop.getMicMuted()
+    } catch (err) {
+      console.error('[desktop] getDesktopMicMuted error:', err)
+    }
+  }
+  return false
+}
+
+export async function setDesktopMicMuted(muted: boolean): Promise<boolean> {
+  if (typeof window !== 'undefined' && window.jarvisDesktop?.setMicMuted) {
+    try {
+      return await window.jarvisDesktop.setMicMuted(muted)
+    } catch (err) {
+      console.error('[desktop] setDesktopMicMuted error:', err)
+    }
+  }
+  return false
+}
+
+export async function toggleDesktopMicMute(): Promise<boolean> {
+  if (typeof window !== 'undefined' && window.jarvisDesktop?.toggleMicMute) {
+    try {
+      return await window.jarvisDesktop.toggleMicMute()
+    } catch (err) {
+      console.error('[desktop] toggleDesktopMicMute error:', err)
+    }
+  }
+  return false
+}
+

@@ -1,4 +1,4 @@
-import { getMic } from './audio'
+import { getMic, isMicMuted } from './audio'
 
 /**
  * Voice-activity detection and segment capture.
@@ -142,7 +142,7 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
   let speaking = false
   let speechStartedAt = 0
   let lastLoud = 0
-  let raf = 0
+  let timerId: ReturnType<typeof setInterval> | null = null
 
   const rms = (): number => {
     analyser.getFloatTimeDomainData(buf)
@@ -202,7 +202,17 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
 
   const tick = () => {
     if (stopped) return
-    raf = requestAnimationFrame(tick)
+
+    if (isMicMuted()) {
+      if (recorder) discardRecorder()
+      speaking = false
+      armedAt = 0
+      return
+    }
+
+    if (ctx.state === 'suspended') {
+      void ctx.resume()
+    }
 
     const energy = rms()
     smoothEnergy += (energy - smoothEnergy) * 0.5
@@ -250,12 +260,16 @@ export async function startVad(h: VadHandlers): Promise<Vad> {
     }
   }
 
-  tick()
+  // Unthrottled 30ms interval ensures continuous background VAD when window is hidden
+  timerId = setInterval(tick, 30)
 
   return {
     stop: () => {
       stopped = true
-      cancelAnimationFrame(raf)
+      if (timerId !== null) {
+        clearInterval(timerId)
+        timerId = null
+      }
       discardRecorder()
       try {
         source.disconnect()

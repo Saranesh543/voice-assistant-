@@ -14,7 +14,7 @@ import { listenForClap } from './lib/clap'
 import * as camera from './lib/camera'
 import * as kokoro from './lib/kokoro'
 import { TTS_ENGINE } from './config'
-import { forTool, attention } from './lib/fillers'
+import { forTool } from './lib/fillers'
 import {
   ask,
   warm,
@@ -30,7 +30,15 @@ import {
   usingBridge,
   type Msg,
 } from './lib/brain'
-import { startAnalyser, micLevel } from './lib/audio'
+import {
+  startAnalyser,
+  micLevel,
+  resumeAudioContext,
+  watchMicMute,
+  isMicMuted,
+  setMicMuted,
+  getMic,
+} from './lib/audio'
 import { probeCapabilities } from './lib/capabilities'
 import { env } from './config'
 import { initDesktopIntegration } from './lib/desktop'
@@ -85,6 +93,7 @@ export default function App() {
    */
   const turn = useRef(0)
   const booting = useRef(false)
+  const lastWakeAt = useRef(0)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voicePoll = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -242,6 +251,15 @@ export default function App() {
     const phase = store.getState().phase
     if (phase === 'offline' || phase === 'boot') return
 
+    const now = Date.now()
+    if (now - lastWakeAt.current < 1200) return
+    lastWakeAt.current = now
+
+    // If window is minimized or hidden or not focused, summon window via desktop IPC
+    if (typeof document !== 'undefined' && (document.hidden || !document.hasFocus())) {
+      void window.jarvisDesktop?.summonWindow?.()
+    }
+
     store.getState().setError(null)
     sfx.play('wake')
 
@@ -254,12 +272,10 @@ export default function App() {
 
     store.getState().setPhase('waking')
 
-    // Answer to his name. Deliberately NOT awaited any more: the microphone is
-    // already open and the echo filter knows his voice, so the user can talk
-    // straight over the greeting instead of waiting it out.
+    // Answer to his name: speak "Yes, sir?" exactly once per summon
     const greeting = createSpeaker()
     speaker.current = greeting
-    greeting.say(attention())
+    greeting.say('Yes, sir?')
     void greeting.end()
 
     listen(AWAIT_SPEECH_MS)
@@ -555,7 +571,12 @@ export default function App() {
     let live: { stop: () => void } | null = null
     let gone = false
     void listenForClap(() => {
-      if (!gone) void powerOn()
+      if (!gone) {
+        if (typeof document !== 'undefined' && (document.hidden || !document.hasFocus())) {
+          void window.jarvisDesktop?.summonWindow?.()
+        }
+        void powerOn()
+      }
     }).then((l) => {
       if (gone) l.stop()
       else live = l
@@ -571,9 +592,34 @@ export default function App() {
   useEffect(() => {
     const cleanupDesktop = initDesktopIntegration()
 
-    if (!window.jarvisDesktop?.onSummon) return cleanupDesktop
+    // Sync initial mic mute state with desktop
+    void window.jarvisDesktop?.getMicMuted?.().then((muted) => {
+      if (typeof muted === 'boolean') {
+        void setMicMuted(muted)
+        store.getState().setMicMuted(muted)
+      }
+    })
 
-    const unSummon = window.jarvisDesktop.onSummon(() => {
+    const unDesktopMute = window.jarvisDesktop?.onMicMuteChanged?.((muted) => {
+      void setMicMuted(muted)
+      store.getState().setMicMuted(muted)
+    })
+
+    const unAudioMute = watchMicMute((muted) => {
+      store.getState().setMicMuted(muted)
+    })
+
+    const unResume = window.jarvisDesktop?.onResume?.(() => {
+      console.log('[jarvis] system resume received from desktop powerMonitor')
+      resumeAudioContext()
+      if (!isMicMuted()) {
+        void getMic().catch((err) => {
+          console.warn('[jarvis] failed to acquire mic on resume:', err)
+        })
+      }
+    })
+
+    const unSummon = window.jarvisDesktop?.onSummon?.(() => {
       const currentPhase = store.getState().phase
       if (currentPhase === 'offline') {
         void powerOn()
@@ -584,7 +630,7 @@ export default function App() {
       }
     })
 
-    const unEmergency = window.jarvisDesktop.onEmergencyStop?.(() => {
+    const unEmergency = window.jarvisDesktop?.onEmergencyStop?.(() => {
       silence()
       clearIdle()
       interrupt()
@@ -598,7 +644,10 @@ export default function App() {
 
     return () => {
       cleanupDesktop()
-      unSummon()
+      unDesktopMute?.()
+      unAudioMute()
+      unResume?.()
+      unSummon?.()
       unEmergency?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
