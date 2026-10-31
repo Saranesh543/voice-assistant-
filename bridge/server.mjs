@@ -22,13 +22,14 @@ import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { homedir, tmpdir } from 'node:os'
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
 import { probeUrl, renderPage } from './page.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
+const HOST = process.env.JARVIS_BRIDGE_HOST ?? '127.0.0.1'
 
 /**
  * A crash here takes the whole assistant down mid-sentence, and most of what
@@ -74,9 +75,25 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 const isDevPort = (port) =>
   (port >= 5173 && port <= 5199) || (port >= 4173 && port <= 4199)
 
-function originAllowed(origin) {
-  if (!origin) return ALLOW_NO_ORIGIN
+const BRIDGE_TOKEN = process.env.JARVIS_BRIDGE_TOKEN
+
+function checkToken(req) {
+  if (!BRIDGE_TOKEN) return false
+  const headerToken = req?.headers?.['x-jarvis-token'] ?? req?.headers?.['authorization']?.replace(/^Bearer\s+/i, '')
+  if (headerToken && headerToken === BRIDGE_TOKEN) return true
+  try {
+    const u = new URL(req?.url ?? '', 'http://127.0.0.1')
+    if (u.searchParams.get('token') === BRIDGE_TOKEN) return true
+  } catch {}
+  return false
+}
+
+function originAllowed(origin, req) {
+  if (!origin) return ALLOW_NO_ORIGIN || checkToken(req)
   if (EXTRA_ORIGINS.has(origin.replace(/\/+$/, ''))) return true
+  if (origin.startsWith('app://') || origin.startsWith('file://') || origin === 'null') {
+    if (checkToken(req)) return true
+  }
   let url
   try {
     url = new URL(origin)
@@ -485,7 +502,7 @@ const FILE_ROOTS = [
   // $TMPDIR under /var/folders while half the tools that take a screenshot
   // still write it to /tmp. Dropping one of them loses real panels.
   tmpdir(),
-  '/tmp',
+  ...(existsSync('/tmp') ? ['/tmp'] : []),
   ...(process.env.JARVIS_FILE_ROOTS ?? '')
     .split(',')
     .map((s) => s.trim())
@@ -498,12 +515,17 @@ const FILE_ROOTS = [
   }
 })
 
+const isWin = process.platform === 'win32'
+
 /** True when `real` sits inside one of the roots, after both are resolved. */
-const withinRoots = (real) =>
-  FILE_ROOTS.some((root) => {
-    const rel = relative(root, real)
+const withinRoots = (real) => {
+  const normReal = isWin ? real.toLowerCase() : real
+  return FILE_ROOTS.some((root) => {
+    const normRoot = isWin ? root.toLowerCase() : root
+    const rel = relative(normRoot, normReal)
     return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
   })
+}
 
 // ---------------------------------------------------------------------------
 
@@ -664,7 +686,7 @@ const http = await import('node:http')
 
 const handleRequest = async (req, res) => {
   const origin = req.headers.origin
-  if (origin && !originAllowed(origin)) {
+  if (origin && !originAllowed(origin, req)) {
     console.warn(`[jarvis] refused http request from origin ${origin}`)
     res.writeHead(403, { vary: 'origin' })
     return res.end('forbidden')
@@ -988,7 +1010,7 @@ const wss = new WebSocketServer({
       console.warn(`[jarvis] rejected websocket on path ${path}`)
       return done(false, 403, 'Forbidden')
     }
-    if (!originAllowed(origin)) {
+    if (!originAllowed(origin, req)) {
       console.warn(
         `[jarvis] rejected websocket from origin ${origin ?? '(none)'}` +
           ' — set JARVIS_ALLOWED_ORIGINS to permit it',
@@ -998,9 +1020,9 @@ const wss = new WebSocketServer({
     done(true)
   },
 })
-server.listen(PORT)
+server.listen(PORT, HOST)
 
-console.log(`[jarvis] bridge listening on ws://localhost:${PORT}`)
+console.log(`[jarvis] bridge listening on ws://${HOST}:${PORT}`)
 console.log(
   `[jarvis] speech ${elevenKey() ? 'via ElevenLabs (key from MCP config)' : 'using browser fallback voice'}`,
 )

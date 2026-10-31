@@ -13,6 +13,7 @@ import { Core } from './Core'
 import { Particles } from './Particles'
 import { Orbits } from './Orbits'
 import { useStore, phaseColor, accentFor, type Phase } from '../store'
+import { isDesktop } from '../lib/desktop'
 
 /** Rings spin harder while JARVIS is working — reads as effort. */
 const spinFor: Record<Phase, number> = {
@@ -233,7 +234,7 @@ export function Scene() {
           modulationOffset={0}
         />
         <Noise opacity={0.035} blendFunction={BlendFunction.OVERLAY} />
-        <Vignette eskil={false} offset={0.22} darkness={0.95} />
+        <Vignette eskil={false} offset={0.22} darkness={isDesktop() ? 0.25 : 0.95} />
       </EffectComposer>
     </Canvas>
   )

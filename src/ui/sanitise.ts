@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { BRIDGE_HTTP_URL } from '../config'
+import { isDiskPath, stripFileProtocol } from '../lib/paths'
 
 /**
  * The safety boundary for model-authored markup.
@@ -13,40 +14,12 @@ import { BRIDGE_HTTP_URL } from '../config'
  * model that has, moments earlier, been reading pages off the open web.
  */
 
-/**
- * Paths that are genuinely on this machine's disk, as opposed to app-relative
- * URLs that happen to start with a slash. `/vite.svg` is one of our own static
- * assets; `/Users/you/shot.png` is a screenshot JARVIS just took.
- */
-const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
-
-/**
- * Every media URL is rewritten to point at the bridge. Two destinations, for
- * different reasons.
- *
- * `/file` — a page served over http can't load `file:///…`, and the interesting
- * images (phone screenshots, generated art) land on disk as absolute paths.
- *
- * Only real disk paths qualify. Rewriting every src beginning with a slash also
- * caught the app's own assets, so `<img src="/vite.svg">` turned into a read of
- * `/vite.svg` on the host, 404'd, and rendered as 'image unavailable'.
- *
- * `/img` and `/media` — remote http(s) sources, proxied rather than refused. The
- * browser still only ever talks to localhost, which is what lets the page CSP
- * stay closed and stops markup that summarises an untrusted web page from
- * beaconing this machine's address to a host the model was told to use. It also
- * gets the bytes at all: news sites and image CDNs routinely block hotlinking.
- *
- * data:, blob: and app-relative URLs are left exactly as they are — nothing
- * leaves the page for those, so there is nothing to proxy.
- */
 function rewriteSrc(el: Element, attr: 'src' | 'poster', route: 'img' | 'media') {
   const raw = el.getAttribute(attr) ?? ''
   if (!raw) return
 
-  const path = raw.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
+  if (isDiskPath(raw)) {
+    const path = stripFileProtocol(raw)
     el.setAttribute(attr, `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`)
     return
   }

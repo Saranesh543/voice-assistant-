@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
+import { isDesktop } from '../lib/desktop'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
@@ -159,6 +160,13 @@ export function Hud() {
   const gestures = useStore((s) => s.gestures)
   const looking = useStore((s) => s.looking)
   const ui = useStore((s) => s.ui)
+  const [desktopMode, setDesktopMode] = useState<'overlay' | 'compact'>('overlay')
+
+  useEffect(() => {
+    if (!window.jarvisDesktop?.onWindowModeChanged) return
+    const un = window.jarvisDesktop.onWindowModeChanged((m) => setDesktopMode(m))
+    return un
+  }, [])
 
   // accentFor folds JARVIS's overrides in over the phase colour, so one
   // variable on the root carries a theme change into every .hud-* rule without
@@ -205,6 +213,40 @@ export function Hud() {
             {phase === 'boot' && bootNote ? bootNote : statusText[phase]}
           </span>
         </div>
+
+        {isDesktop() && (
+          <div className="desktop-ctrls">
+            <button
+              className="desktop-btn"
+              onClick={() => {
+                void window.jarvisDesktop?.toggleCompactMode().then((m) => {
+                  if (m) setDesktopMode(m)
+                })
+              }}
+              title="Toggle Compact / Overlay Mode"
+            >
+              {desktopMode === 'compact' ? 'OVERLAY' : 'COMPACT'}
+            </button>
+            <button
+              className="desktop-btn"
+              onClick={() => {
+                void window.jarvisDesktop?.hideWindow()
+              }}
+              title="Hide to System Tray"
+            >
+              HIDE
+            </button>
+            <button
+              className="desktop-btn desktop-btn-close"
+              onClick={() => {
+                void window.jarvisDesktop?.quitApp()
+              }}
+              title="Quit Application"
+            >
+              EXIT
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Left rail: which integrations are live */}

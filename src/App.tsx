@@ -32,6 +32,7 @@ import {
 import { startAnalyser, micLevel } from './lib/audio'
 import { probeCapabilities } from './lib/capabilities'
 import { env } from './config'
+import { initDesktopIntegration } from './lib/desktop'
 
 /**
  * The conversation.
@@ -557,6 +558,30 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
+
+  // -- desktop shell integration -------------------------------------------
+  useEffect(() => {
+    const cleanupDesktop = initDesktopIntegration()
+
+    if (!window.jarvisDesktop?.onSummon) return cleanupDesktop
+
+    const unSummon = window.jarvisDesktop.onSummon(() => {
+      const currentPhase = store.getState().phase
+      if (currentPhase === 'offline') {
+        void powerOn()
+      } else if (currentPhase === 'boot') {
+        /* already booting */
+      } else {
+        onWake('')
+      }
+    })
+
+    return () => {
+      cleanupDesktop()
+      unSummon()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // -- level pump + keys ----------------------------------------------------
 
