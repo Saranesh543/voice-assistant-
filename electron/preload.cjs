@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setAutoStart: (enabled) => ipcRenderer.invoke('settings:set-autostart', Boolean(enabled)),
   quitApp: () => ipcRenderer.invoke('app:quit'),
+  emergencyStop: () => ipcRenderer.invoke('app:emergency-stop'),
 
   /**
    * Subscribe to global summon events (Ctrl+Shift+Space or Tray "Wake JARVIS").
@@ -50,6 +51,25 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
     ipcRenderer.on('jarvis:summon', handler)
     return () => {
       ipcRenderer.removeListener('jarvis:summon', handler)
+    }
+  },
+
+  /**
+   * Subscribe to global emergency stop events (Ctrl+Shift+Esc or Tray).
+   * @param {() => void} callback
+   * @returns {() => void} Unsubscribe function
+   */
+  onEmergencyStop: (callback) => {
+    const handler = () => {
+      try {
+        callback()
+      } catch (err) {
+        console.error('[jarvisDesktop] onEmergencyStop error:', err)
+      }
+    }
+    ipcRenderer.on('jarvis:emergency-stop', handler)
+    return () => {
+      ipcRenderer.removeListener('jarvis:emergency-stop', handler)
     }
   },
 
@@ -73,3 +93,4 @@ contextBridge.exposeInMainWorld('jarvisDesktop', {
     }
   },
 })
+

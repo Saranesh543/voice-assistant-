@@ -15,7 +15,9 @@ export interface JarvisDesktopApi {
   }>
   setAutoStart: (enabled: boolean) => Promise<boolean>
   quitApp: () => Promise<void>
+  emergencyStop: () => Promise<void>
   onSummon: (callback: () => void) => () => void
+  onEmergencyStop: (callback: () => void) => () => void
   onWindowModeChanged: (callback: (mode: 'overlay' | 'compact') => void) => () => void
 }
 
@@ -24,3 +26,4 @@ declare global {
     jarvisDesktop?: JarvisDesktopApi
   }
 }
+

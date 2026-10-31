@@ -303,6 +303,39 @@ function summonJarvis() {
 }
 
 // ---------------------------------------------------------------------------
+// Emergency Stop Handler
+// ---------------------------------------------------------------------------
+function triggerEmergencyStop() {
+  console.warn('[desktop] EMERGENCY STOP triggered via global shortcut, tray or HUD')
+  // 1. Notify bridge server to kill all active child automation processes
+  try {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: 8787,
+        path: '/emergency-stop',
+        method: 'POST',
+        timeout: 1500,
+      },
+      (res) => {
+        res.resume()
+      },
+    )
+    req.on('error', (err) => {
+      console.warn('[desktop] emergency stop request error:', err?.message)
+    })
+    req.end()
+  } catch (err) {
+    console.warn('[desktop] failed to dispatch emergency stop:', err?.message)
+  }
+
+  // 2. Notify renderer window to silence audio and clear pending gates
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('jarvis:emergency-stop')
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tray Setup
 // ---------------------------------------------------------------------------
 function updateTrayMenu() {
@@ -327,6 +360,10 @@ function updateTrayMenu() {
     {
       label: 'Wake JARVIS (Listen Now)',
       click: () => summonJarvis(),
+    },
+    {
+      label: 'Emergency Stop Automation (Ctrl+Shift+Esc)',
+      click: () => triggerEmergencyStop(),
     },
     { type: 'separator' },
     {
@@ -554,6 +591,10 @@ function registerIpc() {
     isQuitting = true
     app.quit()
   })
+
+  ipcMain.handle('app:emergency-stop', () => {
+    triggerEmergencyStop()
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +660,30 @@ app.whenReady().then(async () => {
     console.warn(`[desktop] failed to register hotkey: ${shortcut}`)
   }
 
+  // Register Global Emergency Stop Hotkey (Ctrl+Shift+Escape)
+  const stopShortcut = 'CommandOrControl+Shift+Escape'
+  let stopRegistered = false
+  try {
+    stopRegistered = globalShortcut.register(stopShortcut, () => {
+      triggerEmergencyStop()
+    })
+  } catch (err) {
+    console.warn(`[desktop] failed registering ${stopShortcut}:`, err?.message)
+  }
+
+  if (stopRegistered) {
+    console.log(`[desktop] emergency stop hotkey registered: ${stopShortcut}`)
+  } else {
+    // Fallback shortcut: Ctrl+Alt+Backspace
+    const fallbackShortcut = 'CommandOrControl+Alt+Backspace'
+    const fallbackRegistered = globalShortcut.register(fallbackShortcut, () => {
+      triggerEmergencyStop()
+    })
+    if (fallbackRegistered) {
+      console.log(`[desktop] fallback emergency stop hotkey registered: ${fallbackShortcut}`)
+    }
+  }
+
   // Start Bridge
   await startBridge()
 
@@ -648,3 +713,4 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   // On desktop background apps, keep running in the tray
 })
+

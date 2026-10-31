@@ -25,6 +25,7 @@ import {
   watchCapture,
   watchUi,
   watchConnection,
+  watchConfirm,
   connectedLabels,
   usingBridge,
   type Msg,
@@ -422,6 +423,13 @@ export default function App() {
       }
     })
 
+    // Holographic confirmation gate for Tier 2/3 Windows actions
+    watchConfirm((request) => {
+      return new Promise<boolean>((resolve) => {
+        store.getState().setPendingConfirm({ request, resolve })
+      })
+    })
+
     // The interface is JARVIS's to drive. These arrive out of band, pushed
     // mid-turn the way panels are, so a command can retint the reactor or put
     // something into orbit while he is still speaking the sentence about it.
@@ -576,9 +584,22 @@ export default function App() {
       }
     })
 
+    const unEmergency = window.jarvisDesktop.onEmergencyStop?.(() => {
+      silence()
+      clearIdle()
+      interrupt()
+      store.getState().resolvePendingConfirm(false)
+      store.getState().setActiveTool(null)
+      store.getState().setCaption('')
+      if (store.getState().phase !== 'offline' && store.getState().phase !== 'boot') {
+        store.getState().setPhase('dormant')
+      }
+    })
+
     return () => {
       cleanupDesktop()
       unSummon()
+      unEmergency?.()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

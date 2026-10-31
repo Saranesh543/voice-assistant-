@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ConfirmRequest } from './lib/bridge'
 
 export type Phase =
   | 'offline'   // waiting for the click that unlocks audio
@@ -241,6 +242,12 @@ type State = {
   /** JARVIS's control over his own appearance. UI_DEFAULTS == the stock look. */
   ui: UiState
 
+  /** Active confirmation gate requested by bridge before effectful operations. */
+  pendingConfirm: {
+    request: ConfirmRequest
+    resolve: (approved: boolean) => void
+  } | null
+
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
@@ -268,6 +275,9 @@ type State = {
   fireEffect: (kind: UiEffect['kind']) => void
   resetUi: () => void
   clearScreen: (what: 'all' | 'panels' | 'transcript') => void
+
+  setPendingConfirm: (confirm: { request: ConfirmRequest; resolve: (approved: boolean) => void } | null) => void
+  resolvePendingConfirm: (approved: boolean) => void
 }
 
 export const useStore = create<State>((set) => ({
@@ -287,6 +297,17 @@ export const useStore = create<State>((set) => ({
   expandedBlade: null,
   bootNote: '',
   ui: defaultUi(),
+  pendingConfirm: null,
+
+  setPendingConfirm: (pendingConfirm) => set({ pendingConfirm }),
+  resolvePendingConfirm: (approved) => {
+    set((state) => {
+      if (state.pendingConfirm) {
+        state.pendingConfirm.resolve(approved)
+      }
+      return { pendingConfirm: null }
+    })
+  },
 
   setVoice: (voice) => set({ voice }),
   setGestures: (gestures) => set({ gestures }),

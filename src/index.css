@@ -96,6 +96,19 @@ html.mode-compact .log {
   box-shadow: 0 0 8px rgba(255, 50, 70, 0.5);
 }
 
+.desktop-btn-stop {
+  background: rgba(255, 77, 77, 0.12);
+  border-color: rgba(255, 77, 77, 0.45);
+  color: #ff8888;
+}
+
+.desktop-btn-stop:hover {
+  background: rgba(255, 50, 70, 0.35);
+  border-color: #ff3344;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(255, 50, 70, 0.6);
+}
+
 /* Faint scanlines + radial falloff so the 3D never sits on flat black. */
 body::after {
   content: '';
@@ -1968,4 +1981,155 @@ kbd {
   object-fit: cover;
   transform: scaleX(-1);
   background: #000;
+}
+
+/* ---------------------------------------------------------------------------
+   Confirmation Modal (Tier 2/3 Windows Action Safety Gate)
+   --------------------------------------------------------------------------- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 99;
+  background: rgba(2, 8, 12, 0.72);
+  backdrop-filter: blur(14px);
+  pointer-events: auto;
+}
+
+.confirm-card {
+  position: relative;
+  width: min(90vw, 540px);
+  padding: 28px 32px 24px;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 4px;
+  background: rgba(5, 14, 20, 0.92);
+  backdrop-filter: blur(20px);
+  color: #fff;
+  pointer-events: auto;
+}
+
+.confirm-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.confirm-kicker {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  padding: 3px 8px;
+  border: 1px solid;
+  border-radius: 2px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.confirm-tool {
+  font-size: 11px;
+  opacity: 0.7;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+}
+
+.confirm-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 16px;
+  letter-spacing: 0.08em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.confirm-detail-box {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.confirm-detail-text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #c9e4ea;
+}
+
+.confirm-timer-bar-wrap {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  margin-bottom: 6px;
+  overflow: hidden;
+  border-radius: 1px;
+}
+
+.confirm-timer-bar {
+  height: 100%;
+  transition: width 0.25s linear;
+}
+
+.confirm-timer-label {
+  font-size: 9px;
+  opacity: 0.55;
+  letter-spacing: 0.18em;
+  text-align: right;
+  margin-bottom: 22px;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+}
+
+.confirm-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.2s ease;
+  border: 1px solid;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.confirm-btn .btn-key {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  border: 1px solid;
+  font-family: 'JetBrains Mono', monospace;
+  opacity: 0.85;
+}
+
+.confirm-btn-deny {
+  color: #ff7878;
+  border-color: rgba(255, 120, 120, 0.35);
+  background: rgba(255, 120, 120, 0.08);
+}
+
+.confirm-btn-deny:hover {
+  background: rgba(255, 120, 120, 0.25);
+  border-color: #ff6b6b;
+  box-shadow: 0 0 12px rgba(255, 120, 120, 0.4);
+  color: #ffffff;
+}
+
+.confirm-btn-approve:hover {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 16px currentColor;
 }

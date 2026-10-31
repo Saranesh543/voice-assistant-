@@ -45,7 +45,7 @@ export function initDesktopIntegration(): () => void {
     const el = document.elementFromPoint(e.clientX, e.clientY)
     const isInteractive = Boolean(
       el?.closest(
-        '.bl, .panel, .ignition, .diag, .hud-controls, .desktop-ctrls, button, a, input, video, iframe, [role="button"], kbd',
+        '.bl, .panel, .ignition, .diag, .hud-controls, .desktop-ctrls, .confirm-modal, .confirm-card, button, a, input, video, iframe, [role="button"], kbd',
       ),
     )
 
@@ -65,3 +65,14 @@ export function initDesktopIntegration(): () => void {
     window.removeEventListener('mousemove', onMouseMove)
   }
 }
+
+export async function emergencyStopDesktop(): Promise<void> {
+  if (typeof window !== 'undefined' && window.jarvisDesktop?.emergencyStop) {
+    try {
+      await window.jarvisDesktop.emergencyStop()
+    } catch (err) {
+      console.error('[desktop] emergencyStopDesktop error:', err)
+    }
+  }
+}
+

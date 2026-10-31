@@ -82,6 +82,17 @@ const CONNECT_TIMEOUT_MS = 3_000
  * accepted as a last resort, because on some setups it is all there is.
  */
 async function findSocket() {
+  if (process.platform === 'win32') {
+    try {
+      const pipes = await readdir('\\\\.\\pipe\\')
+      const matches = pipes.filter((p) => p.includes('claude-mcp-browser-bridge'))
+      if (matches.length) {
+        return `\\\\.\\pipe\\${matches[0]}`
+      }
+    } catch {
+      /* fall through to Unix socket path */
+    }
+  }
   let names
   try {
     names = await readdir(SOCKET_DIR)
@@ -247,7 +258,7 @@ class ChromeLink {
       const message = { method: 'execute_tool', params: { tool: name, args: args ?? {} } }
       try {
         return await this.request(message)
-      } catch (err) {
+      } catch {
         this.reset()
         return await this.request(message)
       }

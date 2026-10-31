@@ -35,6 +35,13 @@ type Frame = {
   seconds?: number
   when?: string
   servers?: Array<string | { name?: string }>
+  tool?: string
+  action?: string
+  category?: string
+  title?: string
+  detail?: string
+  timeoutMs?: number
+  approved?: boolean
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
@@ -81,6 +88,28 @@ export type CaptureResult = { data?: string; mimeType?: string; error?: string }
 let onCapture: ((req: CaptureRequest) => Promise<CaptureResult>) | null = null
 export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>) {
   onCapture = fn
+}
+
+/**
+ * Confirmation request for Tier 2/3 Windows control actions.
+ * Prompts the user with an interactive holographic modal before execution.
+ */
+export type ConfirmRequest = {
+  id: string
+  tool: string
+  action?: string
+  category: 'TIER_1_SAFE_ACTION' | 'TIER_2_MUTATION' | 'TIER_3_DESTRUCTIVE' | string
+  title: string
+  detail?: string
+  timeoutMs?: number
+}
+
+let onConfirm: ((req: ConfirmRequest) => Promise<boolean>) | null = null
+export function watchConfirm(fn: (req: ConfirmRequest) => Promise<boolean>): () => void {
+  onConfirm = fn
+  return () => {
+    if (onConfirm === fn) onConfirm = null
+  }
 }
 
 /** Blades arrive the same way panels do — pushed mid-turn, so the article is
@@ -202,6 +231,28 @@ function dispatch(ws: WebSocket) {
         })
           .then(reply)
           .catch((err) => reply({ error: String(err?.message ?? err) }))
+      }
+    } else if (msg.type === 'confirm' && msg.id) {
+      const id = msg.id
+      const reply = (approved: boolean) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'reply', id, approved }))
+        }
+      }
+      if (!onConfirm) {
+        reply(false)
+      } else {
+        onConfirm({
+          id,
+          tool: msg.name ?? msg.tool ?? '',
+          action: msg.action,
+          category: msg.category || 'TIER_2_MUTATION',
+          title: msg.title || 'Authorize Action',
+          detail: msg.detail,
+          timeoutMs: typeof msg.timeoutMs === 'number' ? msg.timeoutMs : 15000,
+        })
+          .then(reply)
+          .catch(() => reply(false))
       }
     } else if (msg.type === 'ui' && msg.op) {
       // A `ui` frame with no args is normal — reset and clear take none — so an
@@ -492,6 +543,17 @@ export function cancel(): void {
 
 /** The older name for `cancel()`. */
 export function interrupt(): void {
+  cancel()
+}
+
+/**
+ * Emergency Stop: signals bridge to kill all active child automation processes,
+ * abort all pending gates, and interrupts the agent session immediately.
+ */
+export function emergencyStop(): void {
+  if (socket?.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'emergency_stop' }))
+  }
   cancel()
 }
 

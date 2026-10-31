@@ -5,7 +5,7 @@ import type { AskHandlers, Msg } from './anthropic'
 import type { Blade, Panel } from '../store'
 
 export type { AskHandlers, Msg }
-export type { ConnectionState } from './bridge'
+export type { ConnectionState, ConfirmRequest } from './bridge'
 
 /**
  * Picks the brain. Both backends answer a question and stream text and tool
@@ -128,4 +128,21 @@ export function watchConnection(
 /** Labels for the HUD's SYSTEMS rail. */
 export function connectedLabels(): string[] {
   return usingBridge ? bridge.bridgeServers() : direct.connectedLabels()
+}
+
+/**
+ * Subscribes to Tier 2/3 confirmation requests from the bridge.
+ */
+export function watchConfirm(
+  fn: (req: bridge.ConfirmRequest) => Promise<boolean>,
+): () => void {
+  return usingBridge ? bridge.watchConfirm(fn) : () => () => {}
+}
+
+/**
+ * Triggers emergency stop on bridge and cancels current speech/turn.
+ */
+export function emergencyStop(): void {
+  if (usingBridge) bridge.emergencyStop()
+  else cancel()
 }

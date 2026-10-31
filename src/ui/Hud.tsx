@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
 import { isDesktop } from '../lib/desktop'
+import { emergencyStop } from '../lib/brain'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
+import { ConfirmModal } from './ConfirmModal'
 
 const statusText: Record<Phase, string> = {
   offline: 'OFFLINE',
@@ -237,6 +239,15 @@ export function Hud() {
               HIDE
             </button>
             <button
+              className="desktop-btn desktop-btn-stop"
+              onClick={() => {
+                emergencyStop()
+              }}
+              title="Emergency Stop Automation (Ctrl+Shift+Esc)"
+            >
+              STOP
+            </button>
+            <button
               className="desktop-btn desktop-btn-close"
               onClick={() => {
                 void window.jarvisDesktop?.quitApp()
@@ -378,6 +389,7 @@ export function Hud() {
         </div>
       )}
       <GestureGuide live={gestures} />
+      <ConfirmModal />
     </div>
   )
 }

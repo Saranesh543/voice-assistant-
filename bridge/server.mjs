@@ -21,12 +21,14 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
+import { windowsServer } from './windows.mjs'
+import { getAuditLog } from './permissions.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
-import { probeUrl, renderPage } from './page.mjs'
+import { renderPage } from './page.mjs'
 
 const PORT = Number(process.env.JARVIS_BRIDGE_PORT ?? 8787)
 const HOST = process.env.JARVIS_BRIDGE_HOST ?? '127.0.0.1'
@@ -40,6 +42,18 @@ const HOST = process.env.JARVIS_BRIDGE_HOST ?? '127.0.0.1'
 process.on('unhandledRejection', (err) => {
   console.error('[jarvis] unhandled rejection:', err)
 })
+
+const activeAbortControllers = new Set()
+
+export function triggerEmergencyStop() {
+  console.warn('[jarvis] EMERGENCY STOP triggered — aborting active tasks')
+  for (const ac of activeAbortControllers) {
+    try {
+      ac.abort(new Error('Emergency stop requested'))
+    } catch {}
+  }
+  activeAbortControllers.clear()
+}
 
 /**
  * Who is allowed to talk to this bridge.
@@ -282,6 +296,10 @@ function decideTool(name) {
     // a write and would hold the whole surface back behind ALLOW_WRITES.
     if (server === 'jarvis' || server === 'jarvis_ui') return true
 
+    // Native Windows PC control server manages its own granular Tier 0-3 policies
+    // and interactive HUD confirmation gate via ask('confirm', ...).
+    if (server === 'jarvis_windows') return true
+
     // The browser server gates itself, at construction: chromeServer() only
     // builds the acting tools — click, type, form input, close tab — when
     // ALLOW_WRITES is set, so anything that reaches here at all is something
@@ -453,7 +471,17 @@ Using tools:
   is read out loud, and a URL becomes "aitch tee tee pee colon slash slash".
   Put the source in the panel as a short tag like "REUTERS" instead.
 - If a tool fails or isn't connected, one plain sentence saying so.
-- If you don't know, say you don't know.`
+- If you don't know, say you don't know.
+
+Windows PC Control & Hardware (\`jarvis_windows\`):
+- You have direct, safe control over this Windows 11 machine via the \`win_*\` tools:
+  - \`win_system\`: Telemetry (CPU, RAM, disk, battery, network), desktop screenshots, volume or brightness, mute, media keys (play/pause/next), and power controls (lock, sleep, restart, shutdown).
+  - \`win_app\`: Launch applications by alias/name, focus active windows, close windows, and list all visible open windows.
+  - \`win_files\`: Search files, read text/code documents, create files/folders, copy, move, rename, and recycle files safely.
+  - \`win_input\`: Type dictated text, send keystrokes/shortcuts (e.g. 'Control+s', 'Alt+Tab', 'Enter'), and click/scroll in active applications.
+  - \`win_browser\`: Open URLs or web search queries in the user's browser, open Windows settings pages (\`ms-settings:*\`), list open tabs, and close tabs.
+  - \`win_dev\`: Run git commands (\`git status\`, \`git diff\`, \`git log\`), open workspaces in VS Code, and execute approved project scripts (\`npm test\`, \`npm run build\`, \`npm run lint\`).
+- Visual Confirmation Gate: Destructive operations (closing apps, file deletion, system shutdown) and mutations trigger an interactive Holographic Authorization Card on the user's HUD. If the user denies or lets the confirmation timer expire, gracefully acknowledge that the action was cancelled without retrying or complaining.`
 
 /**
  * ElevenLabs credentials, borrowed from the MCP server config.
@@ -707,6 +735,26 @@ const handleRequest = async (req, res) => {
     const eleven = Boolean(elevenKey())
     res.writeHead(200, { ...cors, 'content-type': 'application/json' })
     return res.end(JSON.stringify({ ok: true, tts: eleven, stt: eleven }))
+  }
+
+  // Diagnostic audit log of PC control actions (in-memory ring buffer)
+  if (req.method === 'GET' && req.url === '/audit') {
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+    return res.end(JSON.stringify(getAuditLog()))
+  }
+
+  // Global emergency stop endpoint: immediately terminates automation subprocesses
+  if (req.method === 'POST' && req.url === '/emergency-stop') {
+    triggerEmergencyStop()
+    for (const client of wss.clients) {
+      if (client.readyState === 1 /* OPEN */) {
+        try {
+          client.send(JSON.stringify({ type: 'emergency_stop' }))
+        } catch {}
+      }
+    }
+    res.writeHead(200, { ...cors, 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ ok: true, stopped: true }))
   }
 
   // Serve local image files to the page. Screenshots and generated art land on
@@ -1236,6 +1284,8 @@ wss.on('connection', (socket) => {
         jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }),
         // The camera, which unlike everything else here has to ask and wait.
         jarvis_eyes: visionServer(ask),
+        // Native Windows 11 PC control with safe granular tools and HUD confirmation gate.
+        jarvis_windows: windowsServer(ask, activeAbortControllers),
       },
       // A plain system prompt, not the claude_code preset. The preset is
       // tuned for a coding agent — verbose, file-oriented, and a large chunk
@@ -1283,20 +1333,37 @@ wss.on('connection', (socket) => {
       // through a `Bash: echo hello` without asking, and only reaches us for
       // something with a consequence, like a `touch`. So a deny here is
       // reliable; an absence of a call here is not proof nothing ran.
-      canUseTool: async (toolName) => {
+      canUseTool: async (toolName, input) => {
         const ok = decideTool(toolName)
         console.log(`[jarvis] tool ${toolName} -> ${ok ? 'allow' : 'deny'}`)
-        return ok
-          ? { behavior: 'allow' }
-          : {
-              behavior: 'deny',
-              // Every word of this can end up spoken, so it carries no command
-              // to read out — the persona is forbidden from saying one aloud.
-              message:
-                'Blocked: JARVIS is running in read-only mode and cannot take' +
-                ' actions that change anything. Tell the user this action is' +
-                ' unavailable until they enable write access on the machine.',
+        if (!ok) {
+          return {
+            behavior: 'deny',
+            // Every word of this can end up spoken, so it carries no command
+            // to read out — the persona is forbidden from saying one aloud.
+            message:
+              'Blocked: JARVIS is running in read-only mode and cannot take' +
+              ' actions that change anything. Tell the user this action is' +
+              ' unavailable until they enable write access on the machine.',
+          }
+        }
+        if (WRITE_BUILTINS.has(toolName)) {
+          try {
+            const reply = await ask('confirm', {
+              tool: toolName,
+              category: 'TIER_3_DESTRUCTIVE',
+              title: `Authorize Raw ${toolName}`,
+              detail: typeof input === 'object' ? JSON.stringify(input).slice(0, 150) : String(input ?? ''),
+              timeoutMs: 15000,
+            }, 16000)
+            if (!reply?.approved) {
+              return { behavior: 'deny', message: 'Action cancelled by user at confirmation gate.' }
             }
+          } catch {
+            return { behavior: 'deny', message: 'Action timed out waiting for user confirmation.' }
+          }
+        }
+        return { behavior: 'allow' }
       },
     },
   })
@@ -1464,6 +1531,20 @@ wss.on('connection', (socket) => {
 
     if (msg.type === 'interrupt') {
       // Held so the next question can wait for it rather than racing it.
+      const stopped = turnFinished()
+      settling = Promise.resolve(session.interrupt?.())
+        .catch(() => {})
+        .then(() =>
+          Promise.race([
+            stopped,
+            new Promise((r) => setTimeout(r, SETTLE_CAP_MS)),
+          ]),
+        )
+    }
+
+    if (msg.type === 'emergency_stop') {
+      console.warn('[jarvis] emergency stop signal received from socket')
+      triggerEmergencyStop()
       const stopped = turnFinished()
       settling = Promise.resolve(session.interrupt?.())
         .catch(() => {})
